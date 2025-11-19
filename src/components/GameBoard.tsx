@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Player, GameState } from "../types/game";
-import { getRandomDiceRoll, checkWinCondition, formatCurrency, getGridPosition } from "../utils/gameLogic";
+import { getRandomDiceRoll, checkWinCondition, formatCurrency } from "../utils/gameLogic";
 import { EVENT_SQUARES, OPPORTUNITIES, CHALLENGES, QUESTIONS, LADDERS, SNAKES } from "../constants/gameConfig";
 import Board from "./Board";
 import PlayerCard from "./PlayerCard";
@@ -273,3 +273,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ gameState, onPlayerMove }) => {
 };
 
 export default GameBoard;
+
+npm run build
+npm run deploy
