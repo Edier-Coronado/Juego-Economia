@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Player, GameState } from "../types/game";
-import { getRandomDiceRoll, getPositionAfterMoves, checkWinCondition, formatCurrency } from "../utils/gameLogic";
+import { getRandomDiceRoll, checkWinCondition, formatCurrency, getGridPosition } from "../utils/gameLogic";
 import { EVENT_SQUARES, OPPORTUNITIES, CHALLENGES, QUESTIONS, LADDERS, SNAKES } from "../constants/gameConfig";
 import Board from "./Board";
 import PlayerCard from "./PlayerCard";
@@ -40,53 +40,77 @@ const GameBoard: React.FC<GameBoardProps> = ({ gameState, onPlayerMove }) => {
     return new Promise<void>((resolve) => {
       let currentPos = startPos;
       const step = startPos < endPos ? 1 : -1;
+      const totalSteps = Math.abs(endPos - startPos);
 
+      let stepCount = 0;
       const interval = setInterval(() => {
-        currentPos += step;
-
-        if (currentPos === endPos) {
+        if (stepCount >= totalSteps) {
           clearInterval(interval);
-          resolve();
-        } else {
+          
+          // Asegurar que termina en la posición correcta
           const updatedPlayers = [...displayedPlayers];
-          updatedPlayers[playerIndex] = { ...updatedPlayers[playerIndex], position: currentPos };
+          updatedPlayers[playerIndex] = { ...updatedPlayers[playerIndex], position: endPos };
           setDisplayedPlayers(updatedPlayers);
+          
+          resolve();
+          return;
         }
-      }, 100);
+
+        currentPos += step;
+        stepCount++;
+
+        const updatedPlayers = [...displayedPlayers];
+        updatedPlayers[playerIndex] = { ...updatedPlayers[playerIndex], position: currentPos };
+        setDisplayedPlayers(updatedPlayers);
+      }, 200);
     });
   };
 
   const handleRollDice = async () => {
+    if (isRolling || isMoving || gameState.status !== "playing") return;
+
     setIsRolling(true);
     setIsMoving(true);
+    
     const roll = getRandomDiceRoll();
     setDiceRoll(roll);
 
+    // Animación del dado
     await new Promise((r) => setTimeout(r, 1000));
 
-    const currentPos = displayedPlayers[gameState.currentPlayerIndex].position;
+    const currentPlayerIndex = gameState.currentPlayerIndex;
+    const currentPos = displayedPlayers[currentPlayerIndex].position;
+    
+    // CALCULAR NUEVA POSICIÓN CORRECTAMENTE
     let newPosition = currentPos + roll;
 
+    // Si se pasa de 100, rebota
     if (newPosition > 100) {
       newPosition = 100 - (newPosition - 100);
     }
 
-    await movePlayerTile(currentPos, newPosition, gameState.currentPlayerIndex);
-
-    await new Promise((r) => setTimeout(r, 400));
+    // Mover al jugador a la nueva posición
+    await movePlayerTile(currentPos, newPosition, currentPlayerIndex);
+    await new Promise((r) => setTimeout(r, 500));
 
     let finalPosition = newPosition;
 
+    // Verificar escaleras
     if (LADDERS[newPosition]) {
-      await movePlayerTile(newPosition, LADDERS[newPosition], gameState.currentPlayerIndex);
-      finalPosition = LADDERS[newPosition];
-      await new Promise((r) => setTimeout(r, 300));
-    } else if (SNAKES[newPosition]) {
-      await movePlayerTile(newPosition, SNAKES[newPosition], gameState.currentPlayerIndex);
-      finalPosition = SNAKES[newPosition];
-      await new Promise((r) => setTimeout(r, 300));
+      const ladderEnd = LADDERS[newPosition];
+      await movePlayerTile(newPosition, ladderEnd, currentPlayerIndex);
+      finalPosition = ladderEnd;
+      await new Promise((r) => setTimeout(r, 500));
+    } 
+    // Verificar serpientes
+    else if (SNAKES[newPosition]) {
+      const snakeEnd = SNAKES[newPosition];
+      await movePlayerTile(newPosition, snakeEnd, currentPlayerIndex);
+      finalPosition = snakeEnd;
+      await new Promise((r) => setTimeout(r, 500));
     }
 
+    // Verificar eventos en la casilla final
     const eventType = EVENT_SQUARES[finalPosition];
     if (eventType) {
       let event;
@@ -98,7 +122,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ gameState, onPlayerMove }) => {
         title = "¡Oportunidad!";
         moneyChange = event.amount || 0;
         
-        // Mostrar notificación global
         setGlobalNotification({
           message: `+${formatCurrency(moneyChange)}`,
           type: 'gain',
@@ -109,9 +132,8 @@ const GameBoard: React.FC<GameBoardProps> = ({ gameState, onPlayerMove }) => {
         title = "Desafío Financiero";
         moneyChange = -(event.amount || 0);
         
-        // Mostrar notificación global
         setGlobalNotification({
-          message: `-${formatCurrency(event.amount || 0)}`,
+          message: `-${formatCurrency(Math.abs(moneyChange))}`,
           type: 'loss',
           isVisible: true
         });
@@ -120,12 +142,12 @@ const GameBoard: React.FC<GameBoardProps> = ({ gameState, onPlayerMove }) => {
         title = "Pregunta Económica";
       }
 
-      // Actualizar el dinero en el estado local para mostrar cambios inmediatos
-      const updatedPlayers = [...displayedPlayers];
+      // Actualizar dinero localmente
       if (eventType !== "question") {
-        updatedPlayers[gameState.currentPlayerIndex].money += moneyChange;
+        const updatedPlayers = [...displayedPlayers];
+        updatedPlayers[currentPlayerIndex].money += moneyChange;
+        setDisplayedPlayers(updatedPlayers);
       }
-      setDisplayedPlayers(updatedPlayers);
 
       setEventModal({
         isOpen: true,
@@ -133,14 +155,13 @@ const GameBoard: React.FC<GameBoardProps> = ({ gameState, onPlayerMove }) => {
         content: event,
         type: eventType,
       });
-      
-      // Ocultar notificación después de 3 segundos
+
       setTimeout(() => {
         setGlobalNotification(prev => ({ ...prev, isVisible: false }));
       }, 3000);
     } else {
-      // Si no hay evento, proceder normalmente
-      onPlayerMove(gameState.currentPlayerIndex, roll, finalPosition);
+      // Si no hay evento, actualizar estado principal inmediatamente
+      onPlayerMove(currentPlayerIndex, roll, finalPosition);
     }
 
     setIsRolling(false);
@@ -148,19 +169,19 @@ const GameBoard: React.FC<GameBoardProps> = ({ gameState, onPlayerMove }) => {
   };
 
   const handleEventClose = (answer?: string) => {
+    const currentPlayerIndex = gameState.currentPlayerIndex;
+    const currentPlayer = displayedPlayers[currentPlayerIndex];
+
     if (eventModal.type === "question" && answer) {
-      const question = eventModal.content as any;
+      const question = eventModal.content;
       const isCorrect = answer === question.correctAnswer;
 
       if (isCorrect) {
         const reward = question.reward || 0;
-        
-        // Actualizar el estado local
         const updatedPlayers = [...displayedPlayers];
-        updatedPlayers[gameState.currentPlayerIndex].money += reward;
+        updatedPlayers[currentPlayerIndex].money += reward;
         setDisplayedPlayers(updatedPlayers);
         
-        // Mostrar notificación por respuesta correcta
         setGlobalNotification({
           message: `+${formatCurrency(reward)} (Respuesta Correcta)`,
           type: 'gain',
@@ -173,9 +194,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ gameState, onPlayerMove }) => {
       }
     }
 
-    // Actualizar el estado principal con todos los cambios acumulados
-    const currentPlayerIndex = gameState.currentPlayerIndex;
-    const currentPlayer = displayedPlayers[currentPlayerIndex];
+    // Actualizar estado principal con la posición y dinero actual
     onPlayerMove(currentPlayerIndex, diceRoll, currentPlayer.position);
 
     setEventModal({ isOpen: false, title: "", content: null, type: null });
@@ -187,7 +206,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ gameState, onPlayerMove }) => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-blue-900 p-4">
-      {/* Notificación Global de Cambios de Dinero */}
       {globalNotification.isVisible && (
         <div
           className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3 rounded-lg font-bold text-white text-lg shadow-lg animate-bounce ${
